@@ -9,6 +9,9 @@ build:
 	cmake -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=$(BUILD_TYPE)
 	cmake --build $(BUILD_DIR) -j
 
+test: build
+	cd $(BUILD_DIR) && ctest --output-on-failure
+
 format:
 	find include src tests benchmarks -name '*.hpp' -o -name '*.cpp' | xargs clang-format -i
 

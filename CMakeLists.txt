@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build options
+option(NEXUSALLOC_BUILD_TESTS "Build unit tests" OFF)
 option(NEXUSALLOC_USE_HUGEPAGES "Enable hugepage support" ON)
 
 add_library(nexusalloc INTERFACE)
@@ -28,4 +29,9 @@ endif()
 # Link atomic library for 128-bit CAS operations (required for TaggedPtr)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_link_libraries(nexusalloc INTERFACE atomic)
+endif()
+
+if(NEXUSALLOC_BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
 endif()
