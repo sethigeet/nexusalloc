@@ -151,7 +151,7 @@ TEST(StressTest, STLContainerStress) {
 
 // Test various size classes under load
 TEST(StressTest, AllSizeClasses) {
-  const auto& sizes = SizeClass::sizes();
+  const auto& sizes = internal::SizeClass::sizes();
 
   for (size_t block_size : sizes) {
     std::vector<void*> ptrs;
