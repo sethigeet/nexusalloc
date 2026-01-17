@@ -12,6 +12,9 @@ build:
 test: build
 	cd $(BUILD_DIR) && ctest --output-on-failure
 
+bench: build
+	$(BUILD_DIR)/benchmarks/bench_allocator
+
 format:
 	find include src tests benchmarks -name '*.hpp' -o -name '*.cpp' | xargs clang-format -i
 

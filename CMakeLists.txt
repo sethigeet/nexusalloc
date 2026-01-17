@@ -7,6 +7,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build options
 option(NEXUSALLOC_BUILD_TESTS "Build unit tests" OFF)
+option(NEXUSALLOC_BUILD_BENCHMARKS "Build benchmarks" OFF)
 option(NEXUSALLOC_USE_HUGEPAGES "Enable hugepage support" ON)
 
 add_library(nexusalloc INTERFACE)
@@ -34,4 +35,8 @@ endif()
 if(NEXUSALLOC_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(NEXUSALLOC_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()
