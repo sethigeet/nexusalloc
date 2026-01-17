@@ -15,6 +15,7 @@ add_executable(nexusalloc_tests
     test_slab.cpp
     test_atomic_stack.cpp
     test_thread_arena.cpp
+    test_allocator.cpp
 )
 
 target_link_libraries(nexusalloc_tests PRIVATE
