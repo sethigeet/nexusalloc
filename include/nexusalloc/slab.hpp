@@ -9,8 +9,22 @@
 
 namespace nexusalloc {
 
+namespace internal {
+
+class SlabBase {
+ public:
+  virtual ~SlabBase() = default;
+  [[nodiscard]] virtual void* allocate() noexcept = 0;
+  virtual void deallocate(void* ptr) noexcept = 0;
+  [[nodiscard]] virtual bool empty() const noexcept = 0;
+  [[nodiscard]] virtual bool full() const noexcept = 0;
+  [[nodiscard]] virtual bool contains(const void* ptr) const noexcept = 0;
+  [[nodiscard]] virtual void* base() const noexcept = 0;
+};
+}  // namespace internal
+
 template <size_t BlockSize>
-class Slab {
+class Slab : public internal::SlabBase {
   static_assert(BlockSize >= 16, "BlockSize must be at least 16 for alignment");
   static_assert(BlockSize >= sizeof(void*), "BlockSize must fit a pointer");
   static_assert(BlockSize % 16 == 0, "BlockSize must be a multiple of 16");
@@ -41,7 +55,7 @@ class Slab {
   Slab(Slab&&) = delete;
   Slab& operator=(Slab&&) = delete;
 
-  [[nodiscard]] void* allocate() noexcept {
+  [[nodiscard]] void* allocate() noexcept override {
     if (free_head_ == nullptr) {
       return nullptr;
     }
@@ -61,7 +75,7 @@ class Slab {
     return block;
   }
 
-  void deallocate(void* ptr) noexcept {
+  void deallocate(void* ptr) noexcept override {
     if (ptr == nullptr || !contains(ptr)) {
       return;
     }
@@ -74,21 +88,21 @@ class Slab {
     --allocated_count_;
   }
 
-  [[nodiscard]] bool empty() const noexcept { return allocated_count_ == 0; }
+  [[nodiscard]] bool empty() const noexcept override { return allocated_count_ == 0; }
 
-  [[nodiscard]] bool full() const noexcept { return free_head_ == nullptr; }
+  [[nodiscard]] bool full() const noexcept override { return free_head_ == nullptr; }
 
   [[nodiscard]] size_t used_blocks() const noexcept { return allocated_count_; }
 
   [[nodiscard]] size_t free_blocks() const noexcept { return kBlocksPerSlab - allocated_count_; }
 
-  [[nodiscard]] bool contains(const void* ptr) const noexcept {
+  [[nodiscard]] bool contains(const void* ptr) const noexcept override {
     const char* p = static_cast<const char*>(ptr);
     const char* base = static_cast<const char*>(base_);
     return p >= base && p < base + kChunkSize;
   }
 
-  [[nodiscard]] void* base() const noexcept { return base_; }
+  [[nodiscard]] void* base() const noexcept override { return base_; }
 
   [[nodiscard]] const internal::Bitmap<kBlocksPerSlab>& occupancy() const noexcept {
     return occupancy_;
