@@ -36,14 +36,15 @@ class SizeClass {
     }
 
     if (size <= kMaxSlabSize) {
-      // Find the power of 2 >= size
-      size_t power = kMaxSmallSize * 2;
-      size_t idx = kNumSmallClasses;
-      while (power < size && idx < kNumClasses - 1) {
-        power *= 2;
-        ++idx;
-      }
-      return idx;
+      // Use CLZ (Count Leading Zeros) for O(1) power-of-2 index calculation
+      // For large sizes, we need to find the smallest power of 2 >= size
+      // log2_ceil(size) = 64 - clz(size - 1) for size > 1
+      // Large class index = log2_ceil(size) - 9 (since 512 = 2^9 is first large class)
+      //
+      // Example: size=513 -> clz(512) = 55 -> 64-55=9 -> 9-9+16 = 16 (512 class)
+      // Example: size=1024 -> clz(1023) = 54 -> 64-54=10 -> 10-9+16 = 17 (1024 class)
+      unsigned int log2_ceil = 64 - static_cast<unsigned int>(__builtin_clzll(size - 1));
+      return kNumSmallClasses + log2_ceil - 9;
     }
 
     // Too large for slab allocation
