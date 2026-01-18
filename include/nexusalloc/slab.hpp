@@ -53,13 +53,13 @@ class Slab {
   Slab& operator=(Slab&&) = delete;
 
   [[nodiscard]] void* allocate() noexcept {
-    if (free_head_ == nullptr) {
+    if (free_head_ == nullptr) [[unlikely]] {
       return nullptr;
     }
 
     void* block = free_head_;
     void* next = *static_cast<void**>(block);
-    if (next != nullptr) {
+    if (next != nullptr) [[likely]] {
       prefetch_read(next);  // prefetch the next block for bursty allocations
     }
 
@@ -73,7 +73,7 @@ class Slab {
   }
 
   void deallocate(void* ptr) noexcept {
-    if (ptr == nullptr || !contains(ptr)) {
+    if (ptr == nullptr || !contains(ptr)) [[unlikely]] {
       return;
     }
 
@@ -219,7 +219,7 @@ class SlabWrapper {
   [[nodiscard]] size_t class_index() const noexcept { return class_idx_; }
 
   [[nodiscard]] void* allocate() noexcept {
-    if (slab_ptr_ == nullptr) return nullptr;
+    if (slab_ptr_ == nullptr) [[unlikely]] return nullptr;
     switch (class_idx_) {
       NEXUS_GENERATE_ALL_CASES(NEXUS_DISPATCH_CASE, slab_ptr_, allocate())
       default:
@@ -228,7 +228,7 @@ class SlabWrapper {
   }
 
   void deallocate(void* ptr) noexcept {
-    if (slab_ptr_ == nullptr) return;
+    if (slab_ptr_ == nullptr) [[unlikely]] return;
     switch (class_idx_) {
       NEXUS_GENERATE_ALL_CASES(NEXUS_DISPATCH_CASE, slab_ptr_, deallocate(ptr))
       default:

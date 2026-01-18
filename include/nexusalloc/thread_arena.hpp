@@ -25,7 +25,7 @@ class ThreadArena {
   [[nodiscard]] void* allocate(size_t size) noexcept {
     // Treat size 0 as minimum allocation (matches jemalloc behavior)
     // SizeClass::index(0) returns 0, which maps to 16 bytes
-    if (internal::SizeClass::is_large(size)) {
+    if (internal::SizeClass::is_large(size)) [[unlikely]] {
       return allocate_large(size);
     }
 
@@ -33,9 +33,9 @@ class ThreadArena {
     auto& bin = bins_[class_idx];
 
     // Try current slab first
-    if (bin.current_slab.valid()) {
+    if (bin.current_slab.valid()) [[likely]] {
       void* ptr = bin.current_slab.allocate();
-      if (ptr != nullptr) {
+      if (ptr != nullptr) [[likely]] {
         return ptr;
       }
       // Current slab is full, move to full list
@@ -44,7 +44,7 @@ class ThreadArena {
     }
 
     // Try partial slabs
-    if (!bin.partial_slabs.empty()) {
+    if (!bin.partial_slabs.empty()) [[unlikely]] {
       bin.current_slab = std::move(bin.partial_slabs.back());
       bin.partial_slabs.pop_back();
       return bin.current_slab.allocate();
@@ -52,7 +52,7 @@ class ThreadArena {
 
     // Need a new chunk
     void* chunk = request_chunk();
-    if (chunk == nullptr) {
+    if (chunk == nullptr) [[unlikely]] {
       return nullptr;  // Out of memory
     }
 
@@ -62,9 +62,10 @@ class ThreadArena {
   }
 
   void deallocate(void* ptr, size_t size) noexcept {
-    if (ptr == nullptr) return;
+    if (ptr == nullptr) [[unlikely]]
+      return;
 
-    if (internal::SizeClass::is_large(size)) {
+    if (internal::SizeClass::is_large(size)) [[unlikely]] {
       deallocate_large(ptr, size);
       return;
     }
@@ -74,20 +75,20 @@ class ThreadArena {
 
     void* slab_base = internal::slab_base_from_ptr(ptr);
 
-    if (bin.current_slab.valid() && bin.current_slab.base() == slab_base) {
+    if (bin.current_slab.valid() && bin.current_slab.base() == slab_base) [[likely]] {
       bin.current_slab.deallocate(ptr);
       return;
     }
 
     for (auto& slab : bin.partial_slabs) {
-      if (slab.base() == slab_base) {
+      if (slab.base() == slab_base) [[unlikely]] {
         slab.deallocate(ptr);
         return;
       }
     }
 
     for (size_t i = 0; i < bin.full_slabs.size(); ++i) {
-      if (bin.full_slabs[i].base() == slab_base) {
+      if (bin.full_slabs[i].base() == slab_base) [[unlikely]] {
         bin.full_slabs[i].deallocate(ptr);
         // Move to partial list since it now has free blocks
         bin.partial_slabs.push_back(std::move(bin.full_slabs[i]));
@@ -119,7 +120,7 @@ class ThreadArena {
   // Request a new chunk from the global pool or OS
   [[nodiscard]] void* request_chunk() noexcept {
     void* chunk = global_page_stack().pop();
-    if (chunk != nullptr) {
+    if (chunk != nullptr) [[likely]] {
       return chunk;
     }
 
