@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <memory>
 #include <vector>
 
 #include "nexusalloc/atomic_stack.hpp"
@@ -24,10 +23,8 @@ class ThreadArena {
   }
 
   [[nodiscard]] void* allocate(size_t size) noexcept {
-    if (size == 0) {
-      return nullptr;
-    }
-
+    // Treat size 0 as minimum allocation (matches jemalloc behavior)
+    // SizeClass::index(0) returns 0, which maps to 16 bytes
     if (internal::SizeClass::is_large(size)) {
       return allocate_large(size);
     }
@@ -36,21 +33,21 @@ class ThreadArena {
     auto& bin = bins_[class_idx];
 
     // Try current slab first
-    if (bin.current_slab != nullptr) {
-      void* ptr = bin.current_slab->allocate();
+    if (bin.current_slab.valid()) {
+      void* ptr = bin.current_slab.allocate();
       if (ptr != nullptr) {
         return ptr;
       }
       // Current slab is full, move to full list
       bin.full_slabs.push_back(std::move(bin.current_slab));
-      bin.current_slab = nullptr;
+      bin.current_slab = internal::SlabWrapper{};
     }
 
     // Try partial slabs
     if (!bin.partial_slabs.empty()) {
       bin.current_slab = std::move(bin.partial_slabs.back());
       bin.partial_slabs.pop_back();
-      return bin.current_slab->allocate();
+      return bin.current_slab.allocate();
     }
 
     // Need a new chunk
@@ -59,9 +56,9 @@ class ThreadArena {
       return nullptr;  // Out of memory
     }
 
-    // Create new slab for this size class
-    bin.current_slab = create_slab(class_idx, chunk);
-    return bin.current_slab->allocate();
+    // Create new slab for this size class using compile-time dispatch
+    bin.current_slab = internal::SlabWrapper(class_idx, chunk);
+    return bin.current_slab.allocate();
   }
 
   void deallocate(void* ptr, size_t size) noexcept {
@@ -75,21 +72,21 @@ class ThreadArena {
     size_t class_idx = internal::SizeClass::index(size);
     auto& bin = bins_[class_idx];
 
-    if (bin.current_slab && bin.current_slab->contains(ptr)) {
-      bin.current_slab->deallocate(ptr);
+    if (bin.current_slab.valid() && bin.current_slab.contains(ptr)) {
+      bin.current_slab.deallocate(ptr);
       return;
     }
 
     for (auto& slab : bin.partial_slabs) {
-      if (slab->contains(ptr)) {
-        slab->deallocate(ptr);
+      if (slab.contains(ptr)) {
+        slab.deallocate(ptr);
         return;
       }
     }
 
     for (size_t i = 0; i < bin.full_slabs.size(); ++i) {
-      if (bin.full_slabs[i]->contains(ptr)) {
-        bin.full_slabs[i]->deallocate(ptr);
+      if (bin.full_slabs[i].contains(ptr)) {
+        bin.full_slabs[i].deallocate(ptr);
         // Move to partial list since it now has free blocks
         bin.partial_slabs.push_back(std::move(bin.full_slabs[i]));
         bin.full_slabs.erase(bin.full_slabs.begin() + static_cast<ptrdiff_t>(i));
@@ -102,14 +99,14 @@ class ThreadArena {
 
   ~ThreadArena() {
     for (auto& bin : bins_) {
-      if (bin.current_slab) {
-        return_chunk(bin.current_slab->base());
+      if (bin.current_slab.valid()) {
+        return_chunk(bin.current_slab.base());
       }
       for (auto& slab : bin.partial_slabs) {
-        return_chunk(slab->base());
+        return_chunk(slab.base());
       }
       for (auto& slab : bin.full_slabs) {
-        return_chunk(slab->base());
+        return_chunk(slab.base());
       }
     }
   }
@@ -148,66 +145,10 @@ class ThreadArena {
     munmap(ptr, aligned_size);
   }
 
-  [[nodiscard]] std::unique_ptr<internal::SlabBase> create_slab(size_t class_idx,
-                                                                void* chunk) noexcept {
-    switch (class_idx) {
-      case 0:
-        return std::make_unique<Slab<16>>(chunk);
-      case 1:
-        return std::make_unique<Slab<32>>(chunk);
-      case 2:
-        return std::make_unique<Slab<48>>(chunk);
-      case 3:
-        return std::make_unique<Slab<64>>(chunk);
-      case 4:
-        return std::make_unique<Slab<80>>(chunk);
-      case 5:
-        return std::make_unique<Slab<96>>(chunk);
-      case 6:
-        return std::make_unique<Slab<112>>(chunk);
-      case 7:
-        return std::make_unique<Slab<128>>(chunk);
-      case 8:
-        return std::make_unique<Slab<144>>(chunk);
-      case 9:
-        return std::make_unique<Slab<160>>(chunk);
-      case 10:
-        return std::make_unique<Slab<176>>(chunk);
-      case 11:
-        return std::make_unique<Slab<192>>(chunk);
-      case 12:
-        return std::make_unique<Slab<208>>(chunk);
-      case 13:
-        return std::make_unique<Slab<224>>(chunk);
-      case 14:
-        return std::make_unique<Slab<240>>(chunk);
-      case 15:
-        return std::make_unique<Slab<256>>(chunk);
-      case 16:
-        return std::make_unique<Slab<512>>(chunk);
-      case 17:
-        return std::make_unique<Slab<1024>>(chunk);
-      case 18:
-        return std::make_unique<Slab<2048>>(chunk);
-      case 19:
-        return std::make_unique<Slab<4096>>(chunk);
-      case 20:
-        return std::make_unique<Slab<8192>>(chunk);
-      case 21:
-        return std::make_unique<Slab<16384>>(chunk);
-      case 22:
-        return std::make_unique<Slab<32768>>(chunk);
-      case 23:
-        return std::make_unique<Slab<65536>>(chunk);
-      default:
-        return nullptr;
-    }
-  }
-
   struct alignas(internal::kCacheLineSize) SizeClassBin {
-    std::unique_ptr<internal::SlabBase> current_slab{nullptr};
-    std::vector<std::unique_ptr<internal::SlabBase>> partial_slabs;
-    std::vector<std::unique_ptr<internal::SlabBase>> full_slabs;
+    internal::SlabWrapper current_slab{};
+    std::vector<internal::SlabWrapper> partial_slabs;
+    std::vector<internal::SlabWrapper> full_slabs;
   };
 
   std::array<SizeClassBin, internal::SizeClass::kNumClasses> bins_;
