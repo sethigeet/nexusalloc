@@ -45,3 +45,6 @@ build/
 
 # clangd cache directory
 .cache/
+
+# coverage directory
+coverage/
