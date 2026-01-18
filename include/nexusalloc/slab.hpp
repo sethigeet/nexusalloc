@@ -9,6 +9,15 @@
 
 namespace nexusalloc::internal {
 
+// Mask to extract the slab base address from any pointer within the slab.
+// Since slabs are 2MB (kChunkSize) aligned, this mask clears the lower 21 bits.
+inline constexpr uintptr_t kSlabBaseMask = ~(static_cast<uintptr_t>(PageTraits::kChunkSize) - 1);
+
+// Extract the slab base address from a pointer via bitwise masking.
+[[nodiscard]] inline void* slab_base_from_ptr(void* ptr) noexcept {
+  return reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(ptr) & kSlabBaseMask);
+}
+
 template <size_t BlockSize>
 class Slab {
   static_assert(BlockSize >= 16, "BlockSize must be at least 16 for alignment");

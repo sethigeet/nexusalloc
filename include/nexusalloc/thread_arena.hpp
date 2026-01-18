@@ -72,20 +72,22 @@ class ThreadArena {
     size_t class_idx = internal::SizeClass::index(size);
     auto& bin = bins_[class_idx];
 
-    if (bin.current_slab.valid() && bin.current_slab.contains(ptr)) {
+    void* slab_base = internal::slab_base_from_ptr(ptr);
+
+    if (bin.current_slab.valid() && bin.current_slab.base() == slab_base) {
       bin.current_slab.deallocate(ptr);
       return;
     }
 
     for (auto& slab : bin.partial_slabs) {
-      if (slab.contains(ptr)) {
+      if (slab.base() == slab_base) {
         slab.deallocate(ptr);
         return;
       }
     }
 
     for (size_t i = 0; i < bin.full_slabs.size(); ++i) {
-      if (bin.full_slabs[i].contains(ptr)) {
+      if (bin.full_slabs[i].base() == slab_base) {
         bin.full_slabs[i].deallocate(ptr);
         // Move to partial list since it now has free blocks
         bin.partial_slabs.push_back(std::move(bin.full_slabs[i]));
