@@ -113,6 +113,7 @@ TEST_F(SlabTest, ReuseAfterDeallocation) {
   EXPECT_EQ(ptr1, ptr2);
 }
 
+#ifndef NDEBUG
 TEST_F(SlabTest, OccupancyTracking) {
   Slab<64> slab(chunk_);
   chunk_ = nullptr;
@@ -126,3 +127,4 @@ TEST_F(SlabTest, OccupancyTracking) {
   slab.deallocate(ptr);
   EXPECT_TRUE(occupancy.none());
 }
+#endif

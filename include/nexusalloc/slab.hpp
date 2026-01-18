@@ -66,8 +66,10 @@ class Slab {
     free_head_ = next;
     ++allocated_count_;
 
+#ifndef NDEBUG
     size_t idx = block_index(block);
     occupancy_.set(idx);
+#endif
 
     return block;
   }
@@ -77,8 +79,10 @@ class Slab {
       return;
     }
 
+#ifndef NDEBUG
     size_t idx = block_index(ptr);
     occupancy_.clear(idx);
+#endif
 
     *static_cast<void**>(ptr) = free_head_;
     free_head_ = ptr;
@@ -101,20 +105,26 @@ class Slab {
 
   [[nodiscard]] void* base() const noexcept { return base_; }
 
+#ifndef NDEBUG
   [[nodiscard]] const Bitmap<kBlocksPerSlab>& occupancy() const noexcept { return occupancy_; }
+#endif
 
  private:
+#ifndef NDEBUG
   [[nodiscard]] size_t block_index(const void* ptr) const noexcept {
     return (static_cast<const char*>(ptr) - static_cast<const char*>(base_)) / kBlockSize;
   }
+#endif
 
   void* base_{nullptr};
   void* free_head_{nullptr};
   size_t allocated_count_{0};
 
-  // Bitmap for tracking (1 bit per block)
+#ifndef NDEBUG
+  // Bitmap for tracking (1 bit per block) - DEBUG ONLY
   // Aligned to cache line to prevent false sharing
   alignas(kCacheLineSize) Bitmap<kBlocksPerSlab> occupancy_;
+#endif
 };
 
 // Map size class index to block size at compile time
