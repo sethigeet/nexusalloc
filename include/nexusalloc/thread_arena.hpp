@@ -22,9 +22,10 @@ class ThreadArena {
     return arena;
   }
 
-  [[nodiscard]] void* allocate(size_t size) noexcept {
+  [[nodiscard, gnu::hot]] void* allocate(size_t size) noexcept {
     // Treat size 0 as minimum allocation (matches jemalloc behavior)
     // SizeClass::index(0) returns 0, which maps to 16 bytes
+
     if (internal::SizeClass::is_large(size)) [[unlikely]] {
       return allocate_large(size);
     }
@@ -32,36 +33,20 @@ class ThreadArena {
     size_t class_idx = internal::SizeClass::index(size);
     auto& bin = bins_[class_idx];
 
-    // Try current slab first
+    // Fast path: try current slab (this is the only code that gets inlined aggressively)
     if (bin.current_slab.valid()) [[likely]] {
       void* ptr = bin.current_slab.allocate();
       if (ptr != nullptr) [[likely]] {
         return ptr;
       }
-      // Current slab is full, move to full list
-      bin.full_slabs.push_back(std::move(bin.current_slab));
-      bin.current_slab = internal::SlabWrapper{};
     }
 
-    // Try partial slabs
-    if (!bin.partial_slabs.empty()) [[unlikely]] {
-      bin.current_slab = std::move(bin.partial_slabs.back());
-      bin.partial_slabs.pop_back();
-      return bin.current_slab.allocate();
-    }
-
-    // Need a new chunk
-    void* chunk = request_chunk();
-    if (chunk == nullptr) [[unlikely]] {
-      return nullptr;  // Out of memory
-    }
-
-    // Create new slab for this size class using compile-time dispatch
-    bin.current_slab = internal::SlabWrapper(class_idx, chunk);
-    return bin.current_slab.allocate();
+    // Slow path: current slab is full or doesn't exist - not inlined to reduce code size and keep
+    // hot code in the I-cache
+    return allocate_slow(class_idx, bin);
   }
 
-  void deallocate(void* ptr, size_t size) noexcept {
+  [[gnu::hot]] void deallocate(void* ptr, size_t size) noexcept {
     if (ptr == nullptr) [[unlikely]]
       return;
 
@@ -72,32 +57,17 @@ class ThreadArena {
 
     size_t class_idx = internal::SizeClass::index(size);
     auto& bin = bins_[class_idx];
-
     void* slab_base = internal::slab_base_from_ptr(ptr);
 
+    // Fast path: deallocate to current slab (this is the only code that gets inlined)
     if (bin.current_slab.valid() && bin.current_slab.base() == slab_base) [[likely]] {
       bin.current_slab.deallocate(ptr);
       return;
     }
 
-    for (auto& slab : bin.partial_slabs) {
-      if (slab.base() == slab_base) [[unlikely]] {
-        slab.deallocate(ptr);
-        return;
-      }
-    }
-
-    for (size_t i = 0; i < bin.full_slabs.size(); ++i) {
-      if (bin.full_slabs[i].base() == slab_base) [[unlikely]] {
-        bin.full_slabs[i].deallocate(ptr);
-        // Move to partial list since it now has free blocks
-        bin.partial_slabs.push_back(std::move(bin.full_slabs[i]));
-        bin.full_slabs.erase(bin.full_slabs.begin() + static_cast<ptrdiff_t>(i));
-        return;
-      }
-    }
-
-    // Pointer not found in any slab - undefined behavior, silently ignore
+    // Slow path: pointer belongs to partial or full slab - not inlined to reduce code size and keep
+    // hot code in the I-cache
+    deallocate_slow(ptr, slab_base, bin);
   }
 
   ~ThreadArena() {
@@ -115,6 +85,63 @@ class ThreadArena {
   }
 
  private:
+  struct alignas(internal::kCacheLineSize) SizeClassBin {
+    internal::SlabWrapper current_slab{};
+    std::vector<internal::SlabWrapper> partial_slabs;
+    std::vector<internal::SlabWrapper> full_slabs;
+  };
+  std::array<SizeClassBin, internal::SizeClass::kNumClasses> bins_;
+
+  [[nodiscard, gnu::noinline, gnu::cold]]
+  void* allocate_slow(size_t class_idx, SizeClassBin& bin) noexcept {
+    // Move current slab to full list if it exists and is full
+    if (bin.current_slab.valid()) {
+      bin.full_slabs.push_back(std::move(bin.current_slab));
+      bin.current_slab = internal::SlabWrapper{};
+    }
+
+    // Try partial slabs
+    if (!bin.partial_slabs.empty()) {
+      bin.current_slab = std::move(bin.partial_slabs.back());
+      bin.partial_slabs.pop_back();
+      return bin.current_slab.allocate();
+    }
+
+    // Need a new chunk
+    void* chunk = request_chunk();
+    if (chunk == nullptr) {
+      return nullptr;  // Out of memory
+    }
+
+    // Create new slab for this size class using compile-time dispatch
+    bin.current_slab = internal::SlabWrapper(class_idx, chunk);
+    return bin.current_slab.allocate();
+  }
+
+  [[gnu::noinline, gnu::cold]]
+  void deallocate_slow(void* ptr, void* slab_base, SizeClassBin& bin) noexcept {
+    // Search partial slabs
+    for (auto& slab : bin.partial_slabs) {
+      if (slab.base() == slab_base) {
+        slab.deallocate(ptr);
+        return;
+      }
+    }
+
+    // Search full slabs
+    for (size_t i = 0; i < bin.full_slabs.size(); ++i) {
+      if (bin.full_slabs[i].base() == slab_base) {
+        bin.full_slabs[i].deallocate(ptr);
+        // Move to partial list since it now has free blocks
+        bin.partial_slabs.push_back(std::move(bin.full_slabs[i]));
+        bin.full_slabs.erase(bin.full_slabs.begin() + static_cast<ptrdiff_t>(i));
+        return;
+      }
+    }
+
+    // Pointer not found - undefined behavior, silently ignore
+  }
+
   ThreadArena() = default;
 
   // Request a new chunk from the global pool or OS
@@ -147,14 +174,6 @@ class ThreadArena {
     size_t aligned_size = internal::align_up(size, PageTraits::kRegularPageSize);
     munmap(ptr, aligned_size);
   }
-
-  struct alignas(internal::kCacheLineSize) SizeClassBin {
-    internal::SlabWrapper current_slab{};
-    std::vector<internal::SlabWrapper> partial_slabs;
-    std::vector<internal::SlabWrapper> full_slabs;
-  };
-
-  std::array<SizeClassBin, internal::SizeClass::kNumClasses> bins_;
 };
 
 }  // namespace nexusalloc
