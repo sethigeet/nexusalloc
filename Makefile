@@ -1,4 +1,4 @@
-.PHONY: all build build-tests build-bench test bench coverage coverage-clean clean format
+.PHONY: all build build-tests build-bench test bench bench-compare coverage coverage-clean clean format help
 
 BUILD_TYPE ?= Debug
 BUILD_DIR := build/$(shell echo $(BUILD_TYPE) | tr '[:upper:]' '[:lower:]')
@@ -33,6 +33,14 @@ ifeq ($(shell echo $(BUILD_TYPE) | tr '[:upper:]' '[:lower:]'),debug)
 	build/release/benchmarks/bench_allocator
 else
 	$(BUILD_DIR)/benchmarks/bench_allocator
+endif
+
+# Run comparison benchmarks against jemalloc/tcmalloc
+bench-compare: build-bench
+ifeq ($(shell echo $(BUILD_TYPE) | tr '[:upper:]' '[:lower:]'),debug)
+	build/release/benchmarks/bench_comparison
+else
+	$(BUILD_DIR)/benchmarks/bench_comparison
 endif
 
 coverage:
