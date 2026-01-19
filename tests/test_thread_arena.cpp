@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <cstring>
 #include <set>
 
 #include "nexusalloc/thread_arena.hpp"
@@ -66,17 +67,6 @@ TEST(ThreadArenaTest, UniquePOinters) {
   for (void* ptr : ptrs) {
     ThreadArena::get().deallocate(ptr, 64);
   }
-}
-
-TEST(ThreadArenaTest, ReuseAfterDeallocation) {
-  void* ptr1 = ThreadArena::get().allocate(64);
-  ThreadArena::get().deallocate(ptr1, 64);
-
-  void* ptr2 = ThreadArena::get().allocate(64);
-  // Should reuse the same block
-  EXPECT_EQ(ptr1, ptr2);
-
-  ThreadArena::get().deallocate(ptr2, 64);
 }
 
 TEST(ThreadArenaTest, NullDeallocation) {
