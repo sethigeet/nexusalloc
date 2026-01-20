@@ -17,7 +17,8 @@ class AtomicStack {
   AtomicStack& operator=(AtomicStack&&) = delete;
 
   void push(void* chunk) noexcept {
-    if (chunk == nullptr) return;
+    if (chunk == nullptr) [[unlikely]]
+      return;
 
     Node* new_node = static_cast<Node*>(chunk);
     TaggedPtr old_head = head_.load(std::memory_order_relaxed);
@@ -36,7 +37,7 @@ class AtomicStack {
     TaggedPtr new_head;
 
     do {
-      if (old_head.ptr == nullptr) {
+      if (old_head.ptr == nullptr) [[unlikely]] {
         return nullptr;
       }
       new_head.ptr = old_head.ptr->next;

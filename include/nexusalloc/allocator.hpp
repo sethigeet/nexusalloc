@@ -23,14 +23,14 @@ class NexusAllocator {
   constexpr NexusAllocator(const NexusAllocator<U>&) noexcept {}
 
   [[nodiscard]] T* allocate(size_type n) {
-    if (n == 0) {
+    if (n == 0) [[unlikely]] {
       return nullptr;
     }
 
     size_t bytes = n * sizeof(T);
     void* ptr = ThreadArena::get().allocate(bytes);
 
-    if (ptr == nullptr) {
+    if (ptr == nullptr) [[unlikely]] {
       throw std::bad_alloc();
     }
 
@@ -38,7 +38,8 @@ class NexusAllocator {
   }
 
   void deallocate(T* ptr, size_type n) noexcept {
-    if (ptr == nullptr) return;
+    if (ptr == nullptr) [[unlikely]]
+      return;
     size_t bytes = n * sizeof(T);
     ThreadArena::get().deallocate(ptr, bytes);
   }

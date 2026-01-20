@@ -25,7 +25,7 @@ class HugepageProvider {
     ptr = mmap(nullptr, PageTraits::kChunkSize, PROT_READ | PROT_WRITE,
                MAP_PRIVATE | MAP_ANONYMOUS | MAP_HUGETLB | MAP_POPULATE, -1, 0);
 
-    if (ptr == MAP_FAILED) {
+    if (ptr == MAP_FAILED) [[unlikely]] {
       ptr = allocate_regular_chunk();
     }
 #else
@@ -36,7 +36,7 @@ class HugepageProvider {
   }
 
   static void deallocate_chunk(void* ptr) noexcept {
-    if (ptr != nullptr && ptr != MAP_FAILED) {
+    if (ptr != nullptr && ptr != MAP_FAILED) [[likely]] {
       munmap(ptr, PageTraits::kChunkSize);
     }
   }
